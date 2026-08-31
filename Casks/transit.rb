@@ -1,6 +1,6 @@
 cask "transit" do
-  version "6.5.1"
-  sha256 "5c070ad2431a625282b29b1fd490f1529314cc1a2633f1cd1fda9c11142341cc"
+  version "6.5.2"
+  sha256 "dc3b065f78b333d027ec0ecffb004e99d8dc911323b770ee17b939e6dbb5d594"
 
   url "https://downloads.transitai.app/v#{version}/Transit_#{version}_aarch64.dmg",
       verified: "downloads.transitai.app/"
