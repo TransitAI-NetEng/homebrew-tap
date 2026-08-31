@@ -1,0 +1,77 @@
+# Keep Casks/transit.rb pointed at the newest published prod build.
+#
+# This runs HERE rather than in transit-app's release pipeline, and that is
+# the whole point of the design:
+#
+#   * No cross-repo credential. A push from the release workflow would need a
+#     PAT with write access to this repo — a new secret, a new entry in the
+#     rotation runbook, and one more thing that can expire silently. This job
+#     uses the built-in GITHUB_TOKEN, which is scoped to this repo alone.
+#   * It cannot break a release. The bump is downstream of publishing and
+#     reads only the public manifest, so a failure here leaves the release
+#     untouched instead of failing it after a 40-minute build.
+#   * Public repo, so standard-runner minutes are free.
+#
+# The trade is latency: a new version is picked up on the next run rather
+# than the instant it publishes. Hence hourly, plus a manual trigger for
+# when someone wants it immediately.
+name: Bump cask to the newest release
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Specific version to pin (default: newest prod)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bump-cask
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The script validates before it writes: it refuses a malformed sha256
+      # and refuses to bump if the published filename stops matching the URL
+      # template the cask builds, so a rename upstream fails loudly here
+      # instead of silently publishing a cask that 404s on install.
+      - name: Bump
+        run: node scripts/bump-cask.mjs ${{ inputs.version }}
+
+      # Committed through the Contents API rather than `git push`, for two
+      # reasons that both bite in a repo with a protected main:
+      #
+      #   * GitHub SIGNS commits made this way with its own key, so they land
+      #     verified. A plain `git push` from a runner is unsigned, which
+      #     violates the no-unsigned-commits rule this org works under.
+      #   * A direct push is what a branch ruleset blocks. This path needs at
+      #     most a narrow bypass for the Actions app, not a hole for pushes.
+      - name: Commit via the Contents API (signed by GitHub)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Casks/transit.rb; then
+            echo "Already current — nothing to commit."
+            exit 0
+          fi
+          version=$(sed -n 's/^  version "\(.*\)"/\1/p' Casks/transit.rb)
+          [ -n "$version" ] || { echo "could not read the bumped version"; exit 1; }
+          sha=$(gh api "repos/${GITHUB_REPOSITORY}/contents/Casks/transit.rb" \
+                  --jq .sha)
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/Casks/transit.rb" \
+            -f message="transit ${version}" \
+            -f content="$(base64 -w0 Casks/transit.rb)" \
+            -f sha="$sha" \
+            -f branch="${GITHUB_REF_NAME}" >/dev/null
+          echo "Committed transit ${version} (signed by GitHub)."
