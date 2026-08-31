@@ -29,9 +29,13 @@ cask "transit" do
   # Intel Mac installs a binary it cannot execute (Rosetta translates x86 for
   # ARM, not the reverse). Revisit only if the pipeline gains a universal or
   # x86_64 dmg.
+  #
+  # macos: matches the published requirement in the docs (macOS 12 Monterey or
+  # newer). Declaring :big_sur here would have promised an OS the product does
+  # not claim to support.
   auto_updates true
   depends_on arch: :arm64
-  depends_on macos: :big_sur
+  depends_on macos: :monterey
 
   app "Transit.app"
 
